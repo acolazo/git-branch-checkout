@@ -1,0 +1,166 @@
+#!/usr/bin/python3
+import os
+import sys
+import subprocess
+from shutil import which
+import collections
+
+
+GIT = 'git'
+DEFAULT_TIMEOUT = 10
+
+# Declare functions depending on the OS.
+
+
+def clear_windows():
+    os.system("cls")
+
+
+def clear_linux():
+    os.system("clear")
+
+
+def getch_linux():
+    import tty
+    import termios
+
+    def _getch_linux():
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+    return _getch_linux
+
+
+def getch_windows():
+    import msvcrt
+
+    def _getch_windws():
+        return msvcrt.getch()
+    return _getch_windws
+
+
+def setup_alternative_screen_linux():
+    os.system("tput smcup")
+
+
+def remove_alternative_screen_linux():
+    os.system("tput rmcup")
+
+
+def empty_function():
+    pass
+
+
+if os.name == 'nt':
+    # Declare functions for windows
+    getch = getch_windows()
+    clear = clear_windows
+    setup_alternative_screen = empty_function
+    remove_alternative_screen = empty_function
+else:
+    # Declare functions for Linux
+    getch = getch_linux()
+    clear = clear_linux
+    setup_alternative_screen = setup_alternative_screen_linux
+    remove_alternative_screen = remove_alternative_screen_linux
+
+
+def main():
+    if which(GIT) is None:
+        print(f'{GIT} command was not found')
+        exit(1)
+    if not is_inside_work_tree():
+        print('Not inside a git repository')
+        exit(1)
+    setup_alternative_screen()
+    branches = get_branches()
+    indexed_branches = dict(enumerate(branches))
+    min_index = 0
+    max_index = len(branches) - 1
+    current_branch = get_current_branch()
+    buffer = collections.deque(maxlen=3)
+    arrow_down_seq = ['\x1b', '[', 'B']
+    arrow_up_seq = ['\x1b', '[', 'A']
+    try:
+        current_index = branches.index(current_branch)
+    except ValueError:
+        current_index = 0
+    while True:
+        clear()
+        show_branches(indexed_branches, current_index)
+        input_char = getch()
+        buffer.append(input_char)
+        if input_char == 'q':
+            break
+        elif input_char == '\r':
+            checkout(indexed_branches.get(current_index))
+            break
+        elif input_char == 'w' or list(buffer) == arrow_up_seq:
+            if current_index > min_index:
+                current_index -= 1
+        elif input_char == 's' or list(buffer) == arrow_down_seq:
+            if current_index < max_index:
+                current_index += 1
+    clear()
+    remove_alternative_screen()
+
+
+def show_branches(branches, current_index):
+    arrow = "->"
+    empty = " " * len(arrow)
+    for index, branch in branches.items():
+        if current_index == index:
+            print(f"{arrow} {branch}")
+        else:
+            print(f"{empty} {branch}")
+    print("")
+    print("Press 'q' to exit")
+
+
+def checkout(branch):
+    command = [GIT, 'checkout', branch]
+    run_command(command)
+
+
+def get_branches():
+    command = [GIT, 'branch']
+    branches = run_command(command).split()
+    try:
+        branches.remove('*')
+    except ValueError:
+        pass
+    return branches
+
+
+def get_current_branch():
+    command = [GIT, 'rev-parse', '--abbrev-ref', 'HEAD']
+    return run_command(command)
+
+
+def run_command(cmd, timeout=DEFAULT_TIMEOUT):
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        exit(1)
+    encoding = sys.stdout.encoding
+    return out.decode(encoding).strip()
+
+
+def is_inside_work_tree():
+    command = [GIT, 'rev-parse', '--is-inside-work-tree']
+    out = run_command(command)
+    return out.strip() == 'true'
+
+
+if __name__ == '__main__':
+    main()
