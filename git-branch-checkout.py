@@ -3,7 +3,6 @@
 import curses
 import time
 from shutil import which
-import sys
 import subprocess
 from functools import partial
 
@@ -16,15 +15,18 @@ def run_command(cmd, timeout=DEFAULT_TIMEOUT):
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        out, _ = proc.communicate(timeout=timeout)
+        out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         msg = f"A timeout occured while running the command: {cmd}"
         raise RuntimeError(msg)
-    encoding = sys.stdout.encoding
-    return out.decode(encoding).strip()
 
+    if proc.returncode == 0:
+        return out.strip()
+    else:
+        return err.strip()
 
 class Git:
     """Helper class to run Git commands"""
@@ -45,7 +47,7 @@ class Git:
     def switch(self, branch):
         """Switch to a branch"""
         command = [self.git_cmd, 'switch', branch]
-        run_command(command)
+        return run_command(command)
 
     def delete_local_branch(self, branch):
         """Delete a local branch"""
@@ -110,7 +112,7 @@ class MenuApp:
         content_x = sep_x + 2
 
         # Header
-        header = "Menu (w/s or ↑/↓) | R = action | q = quit"
+        header = "Menu (↑/↓) | R = action | q = quit"
         self.stdscr.addstr(0, 2, header[: max(0, w - 4)], curses.A_BOLD)
 
         # Determine menu viewport
@@ -291,12 +293,11 @@ class MenuApp:
         branch = self.get_selected_branch()
         if self.show_remote:
             branch = branch.strip("origin/")
-        self.git.switch(branch)
+        msg = self.git.switch(branch)
         self.current_branch = self.git.get_current_branch()
         self.branches = self.git.get_branches()
         self.show_remote = False
         self.draw()
-        msg = f"Switched to branch: {branch}"
         self.temporal_message(msg)
 
     def git_fetch(self):
@@ -318,11 +319,13 @@ class MenuApp:
         else:
             return selected_branch
 
-    def temporal_message(self, msg):
+    def temporal_message(self, msg: str):
         """
         Show temporal message at the bottom.
         """
         h, w = self.stdscr.getmaxyx()
+        lines = msg.count("\n")
+        h = max(h - lines, 2)
         self.stdscr.addstr(h - 2, 2, " " * max(0, w - 4))
         self.stdscr.addstr(h - 2, 2, msg[: max(0, w - 4)])
         self.stdscr.refresh()
